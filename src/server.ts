@@ -19,9 +19,20 @@ import { configureSocketEvents, recentActivityForSocket } from './websocket/even
 
 const app = express();
 const httpServer = createServer(app);
-const clientUrl = process.env.CLIENT_URL ?? 'http://localhost:5173';
+const normalizeOrigin = (value?: string) => value?.trim().replace(/\/+$/, '');
+const clientUrl = normalizeOrigin(process.env.CLIENT_URL) ?? 'http://localhost:5173';
+const allowedOrigins = new Set([
+  clientUrl,
+  'http://localhost:5173',
+  'https://velozitydashboard.vercel.app',
+  'https://velozity-backend-0b4d.onrender.com',
+].map((origin) => normalizeOrigin(origin)).filter((origin): origin is string => Boolean(origin)));
 
-app.use(cors({ origin: clientUrl, credentials: true }));
+app.use(cors({ origin: (origin, callback) => {
+  const normalizedOrigin = normalizeOrigin(origin);
+  if (!origin || allowedOrigins.has(normalizedOrigin ?? '')) return callback(null, true);
+  return callback(new Error('Not allowed by CORS'));
+}, credentials: true }));
 app.use(express.json());
 app.use(cookieParser());
 app.get('/api/health', (_request, response) => response.json({ success: true, data: { status: 'ok' } }));
@@ -34,7 +45,16 @@ app.use('/api/clients', clientRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 
-const io = new Server(httpServer, { cors: { origin: clientUrl, credentials: true } });
+const io = new Server(httpServer, {
+  cors: {
+    origin: (origin, callback) => {
+      const normalizedOrigin = normalizeOrigin(origin);
+      if (!origin || allowedOrigins.has(normalizedOrigin ?? '')) return callback(null, true);
+      return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+  },
+});
 configureSocketEvents(io);
 const onlineUsers = new Set<number>();
 io.use((socket, next) => {
